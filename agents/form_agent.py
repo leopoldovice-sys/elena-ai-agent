@@ -1,5 +1,6 @@
 import time
 from typing import Any, Dict, List
+from urllib.parse import urlencode
 
 import httpx
 
@@ -30,9 +31,11 @@ def _submit(form: GoogleForm, answers: Dict[str, Any]) -> bool:
         "Referer": f"https://docs.google.com/forms/d/e/{form.form_id}/viewform",
     }
 
+    # httpx >=0.28 no longer accepts a list of tuples for `data`; encode the
+    # urlencoded body ourselves (doseq preserves repeated keys for checkboxes).
     response = httpx.post(
         form.submit_url,
-        data=pairs,
+        content=urlencode(pairs, doseq=True),
         headers=headers,
         follow_redirects=False,
         timeout=15,
