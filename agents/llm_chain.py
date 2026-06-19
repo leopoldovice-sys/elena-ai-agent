@@ -43,9 +43,10 @@ individual who genuinely matches the persona above. Introduce natural human vari
 just make each response feel like a different day or mood for the same type of person
 
 Strict rules:
+- ALL answers must be written in SPANISH, no exceptions.
 - For "multiple_choice" or "dropdown": reply with EXACTLY one of the listed options, verbatim.
 - For "checkboxes": reply with a JSON list of selected options, e.g. ["Option A", "Option B"].
-- For "short_text" / "paragraph": reply with a plain string.
+- For "short_text" / "paragraph": reply with a plain string in Spanish.
 - For "date": use YYYY-MM-DD format.
 - For "time": use HH:MM 24 h format.
 - For "linear_scale": reply with a single integer within the scale range.
