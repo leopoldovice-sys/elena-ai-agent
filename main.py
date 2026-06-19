@@ -2,9 +2,10 @@
 """
 elena-ai-agent — Google Form submission agent powered by Claude.
 
-Usage:
-  python main.py <FORM_URL> --context "..." [--dry-run] [--output result.json]
-  python main.py <FORM_URL> --context-file data.txt
+Usage examples:
+  python main.py <FORM_URL> --persona "..." --count 10
+  python main.py <FORM_URL> --persona-file persona.txt --count 5 --dry-run
+  python main.py <FORM_URL> --persona "..." --count 20 --output results.json
 """
 import argparse
 import json
@@ -20,36 +21,53 @@ from agents.form_agent import run_form_agent
 
 def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
-        description="Synthesize Google Form answers with Claude and submit them automatically.",
+        description=(
+            "Scrape a Google Form, synthesize N persona-consistent answers with Claude, "
+            "and submit them automatically with natural variation between each response."
+        ),
     )
     p.add_argument("form_url", help="Public Google Form viewform URL")
 
-    ctx = p.add_mutually_exclusive_group(required=True)
-    ctx.add_argument(
-        "--context", "-c",
+    persona_group = p.add_mutually_exclusive_group(required=True)
+    persona_group.add_argument(
+        "--persona", "-p",
         metavar="TEXT",
-        help="Context text the LLM will use to generate answers",
+        help='Persona description, e.g. "35-year-old UX designer, enthusiastic about AI"',
     )
-    ctx.add_argument(
-        "--context-file", "-f",
+    persona_group.add_argument(
+        "--persona-file", "-f",
         metavar="PATH",
-        help="Path to a file whose contents are used as context",
+        help="Path to a file containing the persona description",
     )
 
+    p.add_argument(
+        "--count", "-N",
+        type=int,
+        default=1,
+        metavar="N",
+        help="Number of form submissions to generate (default: 1)",
+    )
     p.add_argument(
         "--model", "-m",
         default="claude-sonnet-4-6",
         help="Claude model to use (default: claude-sonnet-4-6)",
     )
     p.add_argument(
+        "--delay", "-d",
+        type=float,
+        default=1.5,
+        metavar="SECONDS",
+        help="Seconds to wait between submissions (default: 1.5)",
+    )
+    p.add_argument(
         "--dry-run", "-n",
         action="store_true",
-        help="Generate answers but do NOT submit the form",
+        help="Synthesize answers but do NOT submit the form",
     )
     p.add_argument(
         "--output", "-o",
         metavar="PATH",
-        help="Write the result JSON to this file",
+        help="Write the full result JSON to this file",
     )
     return p.parse_args()
 
@@ -62,27 +80,34 @@ def main() -> None:
         print("Error: ANTHROPIC_API_KEY is not set. Add it to your .env file.", file=sys.stderr)
         sys.exit(1)
 
-    if args.context_file:
-        with open(args.context_file, encoding="utf-8") as fh:
-            context = fh.read()
+    if args.count < 1:
+        print("Error: --count must be at least 1.", file=sys.stderr)
+        sys.exit(1)
+
+    if args.persona_file:
+        with open(args.persona_file, encoding="utf-8") as fh:
+            persona = fh.read().strip()
     else:
-        context = args.context
+        persona = args.persona
 
     result = run_form_agent(
         form_url=args.form_url,
-        context=context,
+        persona=persona,
+        count=args.count,
         api_key=api_key,
         model=args.model,
+        delay=args.delay,
         dry_run=args.dry_run,
     )
 
-    print("\n--- Result ---")
-    print(json.dumps(result, indent=2, ensure_ascii=False))
+    print("\n--- Summary ---")
+    summary = {k: v for k, v in result.items() if k != "submissions"}
+    print(json.dumps(summary, indent=2, ensure_ascii=False))
 
     if args.output:
         with open(args.output, "w", encoding="utf-8") as fh:
             json.dump(result, fh, indent=2, ensure_ascii=False)
-        print(f"\nResult written to: {args.output}")
+        print(f"\nFull results written to: {args.output}")
 
 
 if __name__ == "__main__":

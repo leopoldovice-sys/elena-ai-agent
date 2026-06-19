@@ -4,10 +4,15 @@ from typing import Any, Dict
 
 import anthropic
 
-from .form_scraper import FormField, GoogleForm
+from .form_scraper import GoogleForm
 
 
-def _build_prompt(form: GoogleForm, context: str) -> str:
+def _build_prompt(
+    form: GoogleForm,
+    persona: str,
+    variation_index: int,
+    total: int,
+) -> str:
     lines = []
     for i, f in enumerate(form.fields, 1):
         line = f"Q{i}: {f.question}  [type: {f.field_type}]"
@@ -20,34 +25,38 @@ def _build_prompt(form: GoogleForm, context: str) -> str:
     questions_block = "\n".join(lines)
 
     return f"""\
-You are filling out a Google Form on behalf of a user.
+You are simulating a real person filling out a Google Form.
 
 Form title: {form.title}
 Form description: {form.description or "N/A"}
 
---- Context to base your answers on ---
-{context}
---- End of context ---
+--- Persona ---
+{persona}
+--- End of persona ---
 
-Answer every question below using ONLY information from the context above.
-Keep answers concise and consistent with each other.
+This is submission {variation_index} of {total}. You must respond as a distinct \
+individual who genuinely matches the persona above. Introduce natural human variation:
+- Vary phrasing and sentence structure in open-ended answers
+- Slightly adjust numeric scores or ratings within what the persona would realistically choose
+- Vary which optional items you emphasize or omit
+- Do NOT make answers contradict the core persona — keep the identity consistent, \
+just make each response feel like a different day or mood for the same type of person
 
-Rules:
+Strict rules:
 - For "multiple_choice" or "dropdown": reply with EXACTLY one of the listed options, verbatim.
-- For "checkboxes": reply with a JSON list of one or more options, e.g. ["Option A", "Option B"].
+- For "checkboxes": reply with a JSON list of selected options, e.g. ["Option A", "Option B"].
 - For "short_text" / "paragraph": reply with a plain string.
 - For "date": use YYYY-MM-DD format.
-- For "time": use HH:MM format (24 h).
+- For "time": use HH:MM 24 h format.
 - For "linear_scale": reply with a single integer within the scale range.
 
 {questions_block}
 
-Respond ONLY with a valid JSON object. Keys are Q1, Q2, … matching the question numbers above.
-Example format: {{"Q1": "Answer here", "Q2": ["Choice A"], "Q3": 4}}"""
+Respond ONLY with a valid JSON object. Keys are Q1, Q2, … matching the question numbers.
+Example: {{"Q1": "Some answer", "Q2": ["Choice A"], "Q3": 7}}"""
 
 
 def _extract_json(text: str) -> dict:
-    # Strip markdown code fences if present
     text = re.sub(r"```(?:json)?", "", text).strip()
     match = re.search(r"\{.*\}", text, re.DOTALL)
     if not match:
@@ -57,13 +66,18 @@ def _extract_json(text: str) -> dict:
 
 def synthesize_answers(
     form: GoogleForm,
-    context: str,
+    persona: str,
     *,
+    variation_index: int = 1,
+    total: int = 1,
     api_key: str | None = None,
     model: str = "claude-sonnet-4-6",
 ) -> Dict[str, Any]:
     """
-    Ask Claude to generate answers for every field in the form.
+    Ask Claude to generate one set of form answers for the given persona.
+
+    variation_index / total drive the natural-variation instruction so each
+    call produces subtly different but persona-consistent answers.
 
     Returns a dict mapping entry_id → answer value (str or list[str]).
     """
@@ -72,7 +86,13 @@ def synthesize_answers(
     message = client.messages.create(
         model=model,
         max_tokens=2048,
-        messages=[{"role": "user", "content": _build_prompt(form, context)}],
+        temperature=1,  # max variation within the persona
+        messages=[
+            {
+                "role": "user",
+                "content": _build_prompt(form, persona, variation_index, total),
+            }
+        ],
     )
 
     raw = message.content[0].text
@@ -84,7 +104,6 @@ def synthesize_answers(
         if q_key not in answers_by_q:
             continue
         answer = answers_by_q[q_key]
-        # Normalise to str for non-list types
         if not isinstance(answer, list):
             answer = str(answer)
         entry_answers[field.entry_id] = answer
